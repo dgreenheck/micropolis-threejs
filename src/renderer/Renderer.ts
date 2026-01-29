@@ -6,6 +6,8 @@ import * as THREE from 'three';
 import { WORLD_W, WORLD_H } from '../core/constants';
 import { Tiles, getTileValue, isZoneCenter } from '../core/tiles';
 import { Micropolis } from '../simulation/Micropolis';
+import { getAssetLoader, AssetLoader } from '../assets/AssetLoader';
+import { getModelForTile, getZoneSize, ModelAsset } from '../assets/AssetManifest';
 
 // Tile size in 3D units
 const TILE_SIZE = 1.0;
@@ -79,6 +81,10 @@ export class Renderer {
   // Last map serial for detecting changes
   private lastMapSerial: number = -1;
 
+  // Asset loader for GLTF models
+  private assetLoader: AssetLoader;
+  private modelsLoaded: boolean = false;
+
   // Raycaster for mouse picking
   private raycaster: THREE.Raycaster;
   private mousePos: THREE.Vector2;
@@ -116,6 +122,9 @@ export class Renderer {
     // Create raycaster
     this.raycaster = new THREE.Raycaster();
     this.mousePos = new THREE.Vector2();
+
+    // Asset loader
+    this.assetLoader = getAssetLoader();
 
     // Setup
     this.setupLights();
@@ -623,7 +632,11 @@ export class Renderer {
     size: number;
     height: number;
     material: string;
+    modelAsset?: ModelAsset;
   } | null {
+    // Try to get a GLTF model for this tile
+    const modelAsset = this.modelsLoaded ? getModelForTile(tile) : null;
+
     // Residential
     if (tile >= Tiles.RESBASE && tile < Tiles.COMBASE) {
       const density = tile < Tiles.HOUSE ? 0 :
@@ -634,6 +647,7 @@ export class Renderer {
         size: 3,
         height: BUILDING_HEIGHTS.RES_BASE + density * (BUILDING_HEIGHTS.RES_MAX - BUILDING_HEIGHTS.RES_BASE),
         material: 'residential',
+        modelAsset: modelAsset || undefined,
       };
     }
 
@@ -645,6 +659,7 @@ export class Renderer {
         size: 3,
         height: BUILDING_HEIGHTS.COM_BASE + density * (BUILDING_HEIGHTS.COM_MAX - BUILDING_HEIGHTS.COM_BASE),
         material: 'commercial',
+        modelAsset: modelAsset || undefined,
       };
     }
 
@@ -656,6 +671,7 @@ export class Renderer {
         size: 3,
         height: BUILDING_HEIGHTS.IND_BASE + density * (BUILDING_HEIGHTS.IND_MAX - BUILDING_HEIGHTS.IND_BASE),
         material: 'industrial',
+        modelAsset: modelAsset || undefined,
       };
     }
 
@@ -686,6 +702,7 @@ export class Renderer {
         size: 4,
         height: BUILDING_HEIGHTS.POWER_PLANT,
         material: 'industrial',
+        modelAsset: tile === Tiles.POWERPLANT ? modelAsset || undefined : undefined,
       };
     }
 
@@ -696,6 +713,7 @@ export class Renderer {
         size: 3,
         height: BUILDING_HEIGHTS.FIRE,
         material: 'special',
+        modelAsset: modelAsset || undefined,
       };
     }
 
@@ -706,6 +724,7 @@ export class Renderer {
         size: 3,
         height: BUILDING_HEIGHTS.POLICE,
         material: 'special',
+        modelAsset: modelAsset || undefined,
       };
     }
 
@@ -726,6 +745,7 @@ export class Renderer {
         size: 3,
         height: BUILDING_HEIGHTS.HOSPITAL,
         material: 'special',
+        modelAsset: modelAsset || undefined,
       };
     }
 
@@ -736,6 +756,7 @@ export class Renderer {
         size: 3,
         height: BUILDING_HEIGHTS.CHURCH,
         material: 'special',
+        modelAsset: modelAsset || undefined,
       };
     }
 
@@ -838,13 +859,53 @@ export class Renderer {
     size: number;
     height: number;
     material: string;
+    modelAsset?: ModelAsset;
   }): void {
+    // Try to use GLTF model if available
+    if (info.modelAsset) {
+      const modelInstance = this.assetLoader.getModelInstance(info.modelAsset);
+      if (modelInstance) {
+        // Get bounding box for scaling
+        const bbox = this.assetLoader.getBoundingBox(info.modelAsset.path);
+        if (bbox) {
+          const modelSize = new THREE.Vector3();
+          bbox.getSize(modelSize);
+
+          // Scale model to fit zone size
+          const targetSize = (info.size - 0.2) * TILE_SIZE;
+          const maxDim = Math.max(modelSize.x, modelSize.z);
+          const scaleFactor = maxDim > 0 ? targetSize / maxDim : 1;
+
+          modelInstance.scale.multiplyScalar(scaleFactor);
+        }
+
+        // Position at tile center
+        modelInstance.position.set(
+          info.pos.x + info.size / 2,
+          0,
+          info.pos.z + info.size / 2
+        );
+
+        // Enable shadows for all meshes in the model
+        modelInstance.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+        });
+
+        this.buildingMeshes.add(modelInstance);
+        return;
+      }
+    }
+
+    // Fallback to procedural geometry
     const width = (info.size - 0.2) * TILE_SIZE;
     const geometry = new THREE.BoxGeometry(width, info.height, width);
     geometry.translate(0, info.height / 2, 0);
 
     const mesh = new THREE.Mesh(geometry, this.materials.get(info.material));
-    mesh.position.set(info.pos.x + 0.5, 0, info.pos.z + 0.5);
+    mesh.position.set(info.pos.x + info.size / 2, 0, info.pos.z + info.size / 2);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
 
@@ -993,6 +1054,24 @@ export class Renderer {
   public focusOn(x: number, y: number): void {
     this.cameraTarget.set(x, 0, y);
     this.updateCamera();
+  }
+
+  /**
+   * Load all 3D model assets
+   * @param onProgress Optional progress callback
+   */
+  public async loadAssets(onProgress?: (loaded: number, total: number) => void): Promise<void> {
+    await this.assetLoader.preloadAll(onProgress);
+    this.modelsLoaded = true;
+    // Rebuild terrain to use loaded models
+    this.rebuildTerrain();
+  }
+
+  /**
+   * Check if models are loaded
+   */
+  public areModelsLoaded(): boolean {
+    return this.modelsLoaded;
   }
 
   /**

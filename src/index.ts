@@ -20,3 +20,7 @@ export { GameUI } from './ui/GameUI';
 
 // Utils
 export { Random, random } from './utils/random';
+
+// Assets
+export { getAssetLoader } from './assets/AssetLoader';
+export * from './assets/AssetManifest';

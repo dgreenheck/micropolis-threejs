@@ -20,10 +20,25 @@ let accumulator = 0;
 const TICK_RATE = 1000 / 30; // 30 ticks per second for simulation
 
 /**
+ * Update loading progress display
+ */
+function updateLoadingProgress(message: string, progress?: number): void {
+  const loadingText = document.getElementById('loading-text');
+  if (loadingText) {
+    if (progress !== undefined) {
+      loadingText.textContent = `${message} (${Math.round(progress * 100)}%)`;
+    } else {
+      loadingText.textContent = message;
+    }
+  }
+}
+
+/**
  * Initialize the game
  */
-function init(): void {
+async function init(): Promise<void> {
   console.log('Initializing Micropolis...');
+  updateLoadingProgress('Initializing...');
 
   // Get the canvas
   const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
@@ -32,18 +47,34 @@ function init(): void {
   }
 
   // Create simulation
+  updateLoadingProgress('Creating simulation...');
   simulation = new Micropolis();
 
   // Generate initial map
   console.log('Generating map...');
+  updateLoadingProgress('Generating map...');
   simulation.newGame(Date.now());
 
   // Create renderer
   console.log('Creating renderer...');
+  updateLoadingProgress('Creating renderer...');
   renderer = new Renderer(canvas, simulation);
+
+  // Load 3D assets
+  console.log('Loading 3D models...');
+  updateLoadingProgress('Loading 3D models...', 0);
+  try {
+    await renderer.loadAssets((loaded, total) => {
+      updateLoadingProgress('Loading 3D models...', loaded / total);
+    });
+    console.log('3D models loaded successfully');
+  } catch (error) {
+    console.warn('Failed to load some 3D models, using fallback geometry:', error);
+  }
 
   // Create UI
   console.log('Setting up UI...');
+  updateLoadingProgress('Setting up UI...');
   ui = new GameUI(simulation, renderer);
 
   // Focus camera on center of map
@@ -115,18 +146,10 @@ function handleError(error: Error): void {
 // Start when DOM is ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
-    try {
-      init();
-    } catch (error) {
-      handleError(error as Error);
-    }
+    init().catch(handleError);
   });
 } else {
-  try {
-    init();
-  } catch (error) {
-    handleError(error as Error);
-  }
+  init().catch(handleError);
 }
 
 // Export for debugging
