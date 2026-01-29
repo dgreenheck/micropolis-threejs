@@ -12,24 +12,26 @@ import { getModelForTile, getZoneSize, ModelAsset } from '../assets/AssetManifes
 // Tile size in 3D units
 const TILE_SIZE = 1.0;
 
-// Colors for different tile types
+// Retro color palette (more saturated, cleaner colors)
 const COLORS = {
-  DIRT: 0x8B7355,
+  DIRT: 0x8B6914,
   GRASS: 0x228B22,
-  WATER: 0x1E90FF,
-  TREES: 0x006400,
-  ROAD: 0x404040,
-  RAIL: 0x696969,
-  POWER: 0xFFD700,
-  RESIDENTIAL: 0x00FF00,
-  COMMERCIAL: 0x0000FF,
-  INDUSTRIAL: 0xFFFF00,
-  FIRE: 0xFF4500,
-  RUBBLE: 0x8B4513,
-  POLLUTION: 0x808000,
+  WATER: 0x0066CC,
+  TREES: 0x006600,
+  ROAD: 0x333333,
+  RAIL: 0x555555,
+  POWER: 0xFFCC00,
+  RESIDENTIAL: 0x00CC00,
+  COMMERCIAL: 0x0066FF,
+  INDUSTRIAL: 0xCCCC00,
+  FIRE: 0xFF3300,
+  RUBBLE: 0x665544,
+  POLLUTION: 0x666600,
   POWERED: 0xFFFFFF,
-  UNPOWERED: 0x444444,
-  SPECIAL: 0xFF00FF,
+  UNPOWERED: 0x333333,
+  SPECIAL: 0xCC00CC,
+  GRID: 0x444444,
+  CURSOR: 0x00FFFF,
 };
 
 // Building heights based on zone development
@@ -62,6 +64,14 @@ export class Renderer {
   private buildingMeshes: THREE.Group;
   private waterMesh: THREE.Mesh | null = null;
   private spriteMeshes: THREE.Group;
+
+  // Grid and cursor
+  private gridMesh: THREE.LineSegments | null = null;
+  private cursorMesh: THREE.Mesh | null = null;
+  private cursorOutline: THREE.LineSegments | null = null;
+  private currentTileX: number = -1;
+  private currentTileY: number = -1;
+  private cursorSize: number = 1; // Size in tiles for current tool
 
   // Camera controls
   private cameraTarget: THREE.Vector3;
@@ -106,7 +116,8 @@ export class Renderer {
 
     // Create scene
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0x1a1a2e, 100, 200);
+    this.scene.background = new THREE.Color(0x87CEEB); // Sky blue background
+    this.scene.fog = new THREE.Fog(0x87CEEB, 150, 300);
 
     // Create camera
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 500);
@@ -129,6 +140,8 @@ export class Renderer {
     // Setup
     this.setupLights();
     this.setupMaterials();
+    this.setupGrid();
+    this.setupCursor();
     this.setupInputHandlers();
     this.resize();
 
@@ -137,125 +150,242 @@ export class Renderer {
   }
 
   /**
-   * Setup lighting
+   * Setup lighting - bright and even for retro look
    */
   private setupLights(): void {
-    // Ambient light
-    const ambient = new THREE.AmbientLight(0x404060, 0.5);
+    // Bright ambient light for flat retro look
+    const ambient = new THREE.AmbientLight(0xffffff, 0.7);
     this.scene.add(ambient);
 
-    // Directional light (sun)
-    const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+    // Directional light (sun) - softer shadows
+    const sun = new THREE.DirectionalLight(0xffffff, 0.8);
     sun.position.set(50, 100, 50);
     sun.castShadow = true;
     sun.shadow.mapSize.width = 2048;
     sun.shadow.mapSize.height = 2048;
     sun.shadow.camera.near = 10;
-    sun.shadow.camera.far = 200;
+    sun.shadow.camera.far = 250;
     sun.shadow.camera.left = -100;
     sun.shadow.camera.right = 100;
     sun.shadow.camera.top = 100;
     sun.shadow.camera.bottom = -100;
     this.scene.add(sun);
 
-    // Hemisphere light for sky color
-    const hemi = new THREE.HemisphereLight(0x87CEEB, 0x8B7355, 0.3);
+    // Hemisphere light for subtle sky/ground variation
+    const hemi = new THREE.HemisphereLight(0x87CEEB, 0x556B2F, 0.2);
     this.scene.add(hemi);
   }
 
   /**
-   * Setup materials
+   * Setup materials - flat Lambert materials for retro look
    */
   private setupMaterials(): void {
-    // Ground material
-    this.materials.set('ground', new THREE.MeshStandardMaterial({
-      color: COLORS.DIRT,
-      roughness: 0.9,
-      metalness: 0.0,
+    // Ground material - grass green
+    this.materials.set('ground', new THREE.MeshLambertMaterial({
+      color: 0x55AA55,
     }));
 
     // Water material
-    this.materials.set('water', new THREE.MeshStandardMaterial({
+    this.materials.set('water', new THREE.MeshLambertMaterial({
       color: COLORS.WATER,
-      roughness: 0.3,
-      metalness: 0.1,
       transparent: true,
-      opacity: 0.8,
+      opacity: 0.85,
     }));
 
     // Tree material
-    this.materials.set('tree', new THREE.MeshStandardMaterial({
+    this.materials.set('tree', new THREE.MeshLambertMaterial({
       color: COLORS.TREES,
-      roughness: 0.8,
-      metalness: 0.0,
     }));
 
     // Road material
-    this.materials.set('road', new THREE.MeshStandardMaterial({
+    this.materials.set('road', new THREE.MeshLambertMaterial({
       color: COLORS.ROAD,
-      roughness: 0.7,
-      metalness: 0.0,
     }));
 
     // Rail material
-    this.materials.set('rail', new THREE.MeshStandardMaterial({
+    this.materials.set('rail', new THREE.MeshLambertMaterial({
       color: COLORS.RAIL,
-      roughness: 0.5,
-      metalness: 0.3,
     }));
 
     // Power line material
-    this.materials.set('power', new THREE.MeshStandardMaterial({
+    this.materials.set('power', new THREE.MeshLambertMaterial({
       color: COLORS.POWER,
-      roughness: 0.3,
-      metalness: 0.8,
       emissive: COLORS.POWER,
-      emissiveIntensity: 0.2,
+      emissiveIntensity: 0.3,
     }));
 
-    // Residential material
-    this.materials.set('residential', new THREE.MeshStandardMaterial({
+    // Residential material - green tint
+    this.materials.set('residential', new THREE.MeshLambertMaterial({
       color: COLORS.RESIDENTIAL,
-      roughness: 0.6,
-      metalness: 0.1,
     }));
 
-    // Commercial material
-    this.materials.set('commercial', new THREE.MeshStandardMaterial({
+    // Commercial material - blue tint
+    this.materials.set('commercial', new THREE.MeshLambertMaterial({
       color: COLORS.COMMERCIAL,
-      roughness: 0.4,
-      metalness: 0.2,
     }));
 
-    // Industrial material
-    this.materials.set('industrial', new THREE.MeshStandardMaterial({
+    // Industrial material - yellow tint
+    this.materials.set('industrial', new THREE.MeshLambertMaterial({
       color: COLORS.INDUSTRIAL,
-      roughness: 0.5,
-      metalness: 0.4,
     }));
 
-    // Special building material
-    this.materials.set('special', new THREE.MeshStandardMaterial({
+    // Special building material - purple/magenta
+    this.materials.set('special', new THREE.MeshLambertMaterial({
       color: COLORS.SPECIAL,
-      roughness: 0.5,
-      metalness: 0.2,
     }));
 
     // Fire material
-    this.materials.set('fire', new THREE.MeshStandardMaterial({
+    this.materials.set('fire', new THREE.MeshLambertMaterial({
       color: COLORS.FIRE,
       emissive: COLORS.FIRE,
-      emissiveIntensity: 0.8,
-      roughness: 0.9,
-      metalness: 0.0,
+      emissiveIntensity: 1.0,
     }));
 
     // Rubble material
-    this.materials.set('rubble', new THREE.MeshStandardMaterial({
+    this.materials.set('rubble', new THREE.MeshLambertMaterial({
       color: COLORS.RUBBLE,
-      roughness: 0.9,
-      metalness: 0.0,
     }));
+  }
+
+  /**
+   * Setup the tile grid overlay
+   */
+  private setupGrid(): void {
+    const gridLines: number[] = [];
+
+    // Vertical lines
+    for (let x = 0; x <= WORLD_W; x++) {
+      gridLines.push(x * TILE_SIZE, 0.05, 0);
+      gridLines.push(x * TILE_SIZE, 0.05, WORLD_H * TILE_SIZE);
+    }
+
+    // Horizontal lines
+    for (let y = 0; y <= WORLD_H; y++) {
+      gridLines.push(0, 0.05, y * TILE_SIZE);
+      gridLines.push(WORLD_W * TILE_SIZE, 0.05, y * TILE_SIZE);
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(gridLines, 3));
+
+    const material = new THREE.LineBasicMaterial({
+      color: COLORS.GRID,
+      transparent: true,
+      opacity: 0.3,
+    });
+
+    this.gridMesh = new THREE.LineSegments(geometry, material);
+    this.scene.add(this.gridMesh);
+  }
+
+  /**
+   * Setup the placement cursor
+   */
+  private setupCursor(): void {
+    // Cursor fill (semi-transparent)
+    const cursorGeometry = new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE);
+    cursorGeometry.rotateX(-Math.PI / 2);
+
+    const cursorMaterial = new THREE.MeshBasicMaterial({
+      color: COLORS.CURSOR,
+      transparent: true,
+      opacity: 0.3,
+      side: THREE.DoubleSide,
+    });
+
+    this.cursorMesh = new THREE.Mesh(cursorGeometry, cursorMaterial);
+    this.cursorMesh.position.set(-100, 0.1, -100); // Start off-screen
+    this.scene.add(this.cursorMesh);
+
+    // Cursor outline
+    const outlineGeometry = new THREE.BufferGeometry();
+    const outlineVerts = [
+      0, 0, 0,
+      TILE_SIZE, 0, 0,
+      TILE_SIZE, 0, 0,
+      TILE_SIZE, 0, TILE_SIZE,
+      TILE_SIZE, 0, TILE_SIZE,
+      0, 0, TILE_SIZE,
+      0, 0, TILE_SIZE,
+      0, 0, 0,
+    ];
+    outlineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(outlineVerts, 3));
+
+    const outlineMaterial = new THREE.LineBasicMaterial({
+      color: COLORS.CURSOR,
+      linewidth: 2,
+    });
+
+    this.cursorOutline = new THREE.LineSegments(outlineGeometry, outlineMaterial);
+    this.cursorOutline.position.set(-100, 0.15, -100);
+    this.scene.add(this.cursorOutline);
+  }
+
+  /**
+   * Update cursor position and size
+   */
+  private updateCursor(): void {
+    const tile = this.getTileAtMouse();
+
+    if (tile) {
+      this.currentTileX = tile.x;
+      this.currentTileY = tile.y;
+
+      // Update cursor fill
+      if (this.cursorMesh) {
+        const size = this.cursorSize;
+        this.cursorMesh.scale.set(size, 1, size);
+        this.cursorMesh.position.set(
+          tile.x * TILE_SIZE + (size * TILE_SIZE) / 2,
+          0.1,
+          tile.y * TILE_SIZE + (size * TILE_SIZE) / 2
+        );
+      }
+
+      // Update cursor outline
+      if (this.cursorOutline) {
+        const size = this.cursorSize;
+        const verts = [
+          0, 0, 0,
+          size * TILE_SIZE, 0, 0,
+          size * TILE_SIZE, 0, 0,
+          size * TILE_SIZE, 0, size * TILE_SIZE,
+          size * TILE_SIZE, 0, size * TILE_SIZE,
+          0, 0, size * TILE_SIZE,
+          0, 0, size * TILE_SIZE,
+          0, 0, 0,
+        ];
+        this.cursorOutline.geometry.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+        this.cursorOutline.position.set(tile.x * TILE_SIZE, 0.15, tile.y * TILE_SIZE);
+      }
+    } else {
+      // Hide cursor when off-map
+      if (this.cursorMesh) {
+        this.cursorMesh.position.set(-100, 0.1, -100);
+      }
+      if (this.cursorOutline) {
+        this.cursorOutline.position.set(-100, 0.15, -100);
+      }
+      this.currentTileX = -1;
+      this.currentTileY = -1;
+    }
+  }
+
+  /**
+   * Set the cursor size for current tool
+   */
+  public setCursorSize(size: number): void {
+    this.cursorSize = size;
+  }
+
+  /**
+   * Get current tile under cursor
+   */
+  public getCurrentTile(): { x: number; y: number } | null {
+    if (this.currentTileX >= 0 && this.currentTileY >= 0) {
+      return { x: this.currentTileX, y: this.currentTileY };
+    }
+    return null;
   }
 
   /**
@@ -940,6 +1070,9 @@ export class Renderer {
   public update(): void {
     // Handle keyboard input
     this.handleInput();
+
+    // Update cursor position
+    this.updateCursor();
 
     // Check if map changed
     if (this.simulation.mapSerial !== this.lastMapSerial) {

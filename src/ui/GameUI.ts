@@ -38,6 +38,31 @@ export class GameUI {
     'query': EditingTool.QUERY,
   };
 
+  // Tool sizes (in tiles)
+  private toolSizes: Record<EditingTool, number> = {
+    [EditingTool.RESIDENTIAL]: 3,
+    [EditingTool.COMMERCIAL]: 3,
+    [EditingTool.INDUSTRIAL]: 3,
+    [EditingTool.FIRESTATION]: 3,
+    [EditingTool.POLICESTATION]: 3,
+    [EditingTool.QUERY]: 1,
+    [EditingTool.WIRE]: 1,
+    [EditingTool.BULLDOZER]: 1,
+    [EditingTool.RAILROAD]: 1,
+    [EditingTool.ROAD]: 1,
+    [EditingTool.STADIUM]: 4,
+    [EditingTool.PARK]: 1,
+    [EditingTool.SEAPORT]: 4,
+    [EditingTool.COALPOWER]: 4,
+    [EditingTool.NUCLEARPOWER]: 4,
+    [EditingTool.AIRPORT]: 6,
+    [EditingTool.NETWORK]: 1,
+    [EditingTool.WATER]: 1,
+    [EditingTool.LAND]: 1,
+    [EditingTool.FOREST]: 1,
+    [EditingTool.COUNT]: 1,
+  };
+
   constructor(simulation: Micropolis, renderer: Renderer) {
     this.simulation = simulation;
     this.renderer = renderer;
@@ -56,6 +81,9 @@ export class GameUI {
     this.setupToolbarHandlers();
     this.setupToolHandlers();
     this.setupCanvasHandlers();
+
+    // Set initial tool and cursor
+    this.setTool(this.currentTool);
 
     // Initial UI update
     this.updateUI();
@@ -197,6 +225,10 @@ export class GameUI {
   public setTool(tool: EditingTool): void {
     this.currentTool = tool;
     this.updateToolButtons();
+
+    // Update cursor size based on tool
+    const size = this.toolSizes[tool] || 1;
+    this.renderer.setCursorSize(size);
 
     // Update info panel with tool info
     const toolNames: Record<number, string> = {
